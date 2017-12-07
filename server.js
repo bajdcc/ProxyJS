@@ -6,6 +6,7 @@ var fs = require('fs');
 var path = require('path');
 var cp = require('child_process');
 var req = require('request');
+var cheerio = require('cheerio');
 
 //创建服务
 var httpServer = http.createServer(processRequest);
@@ -124,29 +125,35 @@ function processRequest(request, response) {
                 j.setCookie(cookie, proxy_src);
                 console.info("** Download: " + filePath);
                 createFolder(filePath);
-                req({ url: proxy_src, jar: j }).pipe(fs.createWriteStream(filePath));
+                req({ url: proxy_src, jar: j }).pipe(fs.createWriteStream(filePath))
+                    .on('close', function () {
+                        if (ext === 'html') {
+                            var text = fs.readFileSync(filePath, 'utf8');
+                            text = text.replace(/(https?:)?\/\/studio\.code\.org/g, '');
+                            console.info("Update html: " + filePath);
 
-                if (ext === 'html') {
-                    response.writeHead(200, { "content-type": contentType });
-                    response.end('<html><head><meta http-equiv="refresh" content="2"></head><body><h1>Loading...</h1><hr><h3>'+proxy_src+'</h3></body></html>');
-                    return;
-                }
+                            var $ = cheerio.load(text);
+                            $('<script src="/inject/inject.js"></script>').appendTo('body');
+                            text = $.html();
 
-                response.writeHead(404, { "content-type": "text/html" });
-                response.end("<h1>404 Not Found</h1>");
+                            fs.writeFileSync(filePath, text, 'utf8');
+                            response.writeHead(200, { "content-type": contentType });
+                            response.end(text);
+                        } else {
+                            response.writeHead(302, {
+                                location: request.url
+                            });
+                            response.end();
+                        }
+                    })
+                    .on('error', function () {
+                        response.writeHead(500, { "content-type": "text/html" });
+                        response.end("<h1>500 Server Error</h1>");
+                    });
             }
         }
         //没出错 并且文件存在
         if (!err && stats.isFile()) {
-            if (ext === 'html') {
-                var text = fs.readFileSync(filePath, 'utf8');
-                text = text.replace(/(https?:)?\/\/studio\.code\.org/g, '');
-                console.info("Update html: " + filePath);
-                fs.writeFileSync(filePath, text, 'utf8');
-                response.writeHead(200, { "content-type": contentType });
-                response.end(text);
-                return;
-            }
             readFile(filePath, contentType);
         }
         //如果路径是目录
